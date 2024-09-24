@@ -1,0 +1,142 @@
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.*;
+
+public class SistemaDistribuido {
+
+    // Fila de tarefas (estrutura concorrente)
+    private static BlockingQueue<Tarefa> filaDeTarefas = new LinkedBlockingQueue<>();
+
+    // Armazena os resultados processados (estrutura concorrente)
+    private static ConcurrentHashMap<Integer, String> resultados = new ConcurrentHashMap<>();
+
+    // Gerador de ID de tarefas único
+    private static AtomicInteger taskIdGenerator = new AtomicInteger(0);
+
+    // Executor para gerenciar threads
+    private static ExecutorService executor = Executors.newFixedThreadPool(10); // Exemplo com 10 threads
+
+    public static void main(String[] args) {
+
+        // Iniciando threads de clientes para enviar tarefas
+        for (int i = 0; i < 5; i++) { // Exemplo com 5 clientes
+            executor.submit(new Cliente(i + 1));
+        }
+
+        // Iniciando threads de nós para processar as tarefas
+        for (int i = 0; i < 3; i++) { // Exemplo com 3 nós de processamento
+            executor.submit(new NoProcessamento(i + 1));
+        }
+
+        // Inicia uma thread para exibir periodicamente os resultados a cada 30 segundos
+        executor.submit(() -> {
+            try {
+                while (!Thread.currentThread().isInterrupted()) {
+                    Thread.sleep(30000); // A cada 30 segundos
+                    exibirResultados(); // Exibe os resultados processados até o momento
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+
+        // Executa o sistema por 2 minutos, depois inicia o shutdown
+        try {
+            Thread.sleep(120000); // Simula execução do sistema por 2 minutos (120.000 milissegundos = 2 minutos)
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+
+        // Inicia o shutdown graceful
+        System.out.println("Iniciando o shutdown do sistema...");
+        executor.shutdown(); // Não aceita novas tarefas, mas permite que as tarefas em andamento sejam concluídas
+
+        try {
+            if (!executor.awaitTermination(60, TimeUnit.SECONDS)) { // Aguarda até 60 segundos para finalizar as tarefas em andamento
+                System.out.println("Forçando o shutdown...");
+                executor.shutdownNow(); // Se as tarefas não forem concluídas após 60 segundos, força a interrupção
+            }
+        } catch (InterruptedException e) {
+            executor.shutdownNow(); // Força o shutdown se a thread principal for interrompida
+        }
+
+        System.out.println("Sistema encerrado.");
+    }
+
+    // Método para exibir os resultados processados
+    private static void exibirResultados() {
+        System.out.println("Resultados das Tarefas Processadas:");
+        resultados.forEach((taskId, result) -> {
+            System.out.println("Tarefa ID: " + taskId + " -> Resultado: " + result);
+        });
+    }
+
+    // Classe representando uma Tarefa
+    static class Tarefa {
+        private final int id;
+
+        public Tarefa(int id) {
+            this.id = id;
+        }
+
+        public int getId() {
+            return id;
+        }
+
+        public String processar() throws InterruptedException {
+            Thread.sleep((int) (Math.random() * 1000) + 500); // Simula processamento com tempo randômico
+            return "Resultado da Tarefa " + id;
+        }
+    }
+
+    // Cliente que envia tarefas
+    static class Cliente implements Runnable {
+        private final int clienteId;
+
+        public Cliente(int clienteId) {
+            this.clienteId = clienteId;
+        }
+
+        @Override
+        public void run() {
+            Random random = new Random();
+            while (!Thread.currentThread().isInterrupted()) { // Executa até ser interrompido
+                try {
+                    int tarefaId = taskIdGenerator.incrementAndGet();
+                    System.out.println("Cliente " + clienteId + " enviando tarefa ID: " + tarefaId);
+                    filaDeTarefas.put(new Tarefa(tarefaId));
+
+                    // Espera randômica entre envio de tarefas
+                    Thread.sleep(random.nextInt(2000) + 1000); // De 1 a 3 segundos
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        }
+    }
+
+    // Nó de processamento que retira tarefas da fila
+    static class NoProcessamento implements Runnable {
+        private final int noId;
+
+        public NoProcessamento(int noId) {
+            this.noId = noId;
+        }
+
+        @Override
+        public void run() {
+            while (!Thread.currentThread().isInterrupted()) { // Executa até ser interrompido
+                try {
+                    Tarefa tarefa = filaDeTarefas.take();
+                    System.out.println("Nó " + noId + " processando tarefa ID: " + tarefa.getId());
+                    String resultado = tarefa.processar();
+                    resultados.put(tarefa.getId(), resultado);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        }
+    }
+}
